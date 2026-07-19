@@ -30,6 +30,28 @@ pub struct SynthParams {
     #[id = "nz_lvl"]
     pub noise_level: FloatParam,
 
+    // --- Filter ---
+    #[id = "flt_cut"]
+    pub filter_cutoff: FloatParam,
+    #[id = "flt_res"]
+    pub filter_resonance: FloatParam,
+    #[id = "flt_env"]
+    pub filter_env_amount: FloatParam,
+    #[id = "flt_key"]
+    pub filter_keytrack: FloatParam,
+    #[id = "flt_drv"]
+    pub filter_drive: FloatParam,
+
+    // --- Filter envelope ---
+    #[id = "flt_att"]
+    pub filt_attack: FloatParam,
+    #[id = "flt_dec"]
+    pub filt_decay: FloatParam,
+    #[id = "flt_sus"]
+    pub filt_sustain: FloatParam,
+    #[id = "flt_rel"]
+    pub filt_release: FloatParam,
+
     // --- Amp envelope ---
     #[id = "amp_att"]
     pub amp_attack: FloatParam,
@@ -138,6 +160,70 @@ impl Default for SynthParams {
             osc1_level: level_param("Osc 1 Level", 1.0),
             osc2_level: level_param("Osc 2 Level", 0.5),
             noise_level: level_param("Noise Level", 0.0),
+
+            filter_cutoff: FloatParam::new(
+                "Filter Cutoff",
+                20_000.0,
+                FloatRange::Skewed {
+                    min: 20.0,
+                    max: 20_000.0,
+                    factor: FloatRange::skew_factor(-2.0),
+                },
+            )
+            .with_smoother(SmoothingStyle::Logarithmic(20.0))
+            .with_value_to_string(formatters::v2s_f32_hz_then_khz(1))
+            .with_string_to_value(formatters::s2v_f32_hz_then_khz()),
+            filter_resonance: FloatParam::new(
+                "Filter Resonance",
+                0.1,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_smoother(SmoothingStyle::Linear(20.0))
+            .with_value_to_string(formatters::v2s_f32_percentage(0))
+            .with_string_to_value(formatters::s2v_f32_percentage())
+            .with_unit("%"),
+            filter_env_amount: FloatParam::new(
+                "Filter Env Amount",
+                24.0,
+                FloatRange::Linear {
+                    min: -96.0,
+                    max: 96.0,
+                },
+            )
+            .with_smoother(SmoothingStyle::Linear(20.0))
+            .with_unit(" st")
+            .with_value_to_string(formatters::v2s_f32_rounded(1)),
+            filter_keytrack: FloatParam::new(
+                "Filter Keytrack",
+                0.5,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_value_to_string(formatters::v2s_f32_percentage(0))
+            .with_string_to_value(formatters::s2v_f32_percentage())
+            .with_unit("%"),
+            filter_drive: FloatParam::new(
+                "Filter Drive",
+                1.0,
+                FloatRange::Skewed {
+                    min: 1.0,
+                    max: 10.0,
+                    factor: FloatRange::skew_factor(-1.0),
+                },
+            )
+            .with_smoother(SmoothingStyle::Linear(20.0))
+            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+
+            filt_attack: envelope_time_param("Filter Attack", 0.001),
+            filt_decay: envelope_time_param("Filter Decay", 0.3),
+            filt_sustain: FloatParam::new(
+                "Filter Sustain",
+                0.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_value_to_string(formatters::v2s_f32_percentage(0))
+            .with_string_to_value(formatters::s2v_f32_percentage())
+            .with_unit("%"),
+            filt_release: envelope_time_param("Filter Release", 0.2),
 
             amp_attack: envelope_time_param("Amp Attack", 0.005),
             amp_decay: envelope_time_param("Amp Decay", 0.2),

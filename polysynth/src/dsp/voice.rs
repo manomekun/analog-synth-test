@@ -1,6 +1,7 @@
 //! A single synthesizer voice: 2 oscillators + noise -> mixer -> amp envelope.
 
 use crate::dsp::envelope::Envelope;
+use crate::dsp::filter::Svf;
 use crate::dsp::noise::Noise;
 use crate::dsp::oscillator::{Oscillator, Waveform};
 use crate::params::SynthParams;
@@ -21,6 +22,12 @@ pub struct RenderParams<'a> {
     pub osc1_level: &'a [f32],
     pub osc2_level: &'a [f32],
     pub noise_level: &'a [f32],
+    pub filter_cutoff: &'a [f32],
+    pub filter_resonance: &'a [f32],
+    pub filter_env_semitones: &'a [f32],
+    pub filter_drive: &'a [f32],
+    /// Keytrack amount 0..1 (unsmoothed).
+    pub filter_keytrack: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -33,11 +40,14 @@ pub struct Voice {
     pub internal_id: u64,
 
     base_freq: f32,
+    sample_rate: f32,
     velocity_gain: f32,
     osc1: Oscillator,
     osc2: Oscillator,
     noise: Noise,
+    filter: Svf,
     amp_env: Envelope,
+    filt_env: Envelope,
 }
 
 impl Voice {
@@ -63,6 +73,13 @@ impl Voice {
             params.amp_sustain.value(),
             params.amp_release.value(),
         );
+        let mut filt_env = Envelope::new(sample_rate);
+        filt_env.note_on(
+            params.filt_attack.value(),
+            params.filt_decay.value(),
+            params.filt_sustain.value(),
+            params.filt_release.value(),
+        );
 
         Self {
             voice_id,
@@ -70,17 +87,21 @@ impl Voice {
             note,
             internal_id,
             base_freq,
+            sample_rate,
             velocity_gain: velocity,
             osc1,
             osc2,
             // Vary the seed per voice so unison noise doesn't correlate.
             noise: Noise::new(0x9E37_79B9 ^ internal_id as u32),
+            filter: Svf::new(),
             amp_env,
+            filt_env,
         }
     }
 
     pub fn note_off(&mut self) {
         self.amp_env.note_off();
+        self.filt_env.note_off();
     }
 
     /// Begin the anti-click fade used when this voice is stolen or choked.
@@ -98,6 +119,10 @@ impl Voice {
 
     /// Render this voice additively into a mono buffer.
     pub fn render(&mut self, output: &mut [f32], rp: &RenderParams) {
+        // Keytracking offset relative to middle C, in semitones.
+        let keytrack_semis = rp.filter_keytrack * (self.note as f32 - 60.0);
+        let max_cutoff = 0.45 * self.sample_rate;
+
         for (i, sample) in output.iter_mut().enumerate() {
             let env = self.amp_env.next();
             if self.amp_env.is_finished() {
@@ -112,7 +137,19 @@ impl Voice {
                 + self.osc2.next(rp.osc2_wave, rp.osc2_pw[i]) * rp.osc2_level[i]
                 + self.noise.next() * rp.noise_level[i];
 
-            *sample += mixed * env * self.velocity_gain;
+            // Modulate the cutoff in the exponential (semitone) domain.
+            let filt_env = self.filt_env.next();
+            let semis = keytrack_semis + rp.filter_env_semitones[i] * filt_env;
+            let cutoff = (rp.filter_cutoff[i] * (semis / 12.0).exp2()).clamp(20.0, max_cutoff);
+            let g = Svf::g(cutoff, self.sample_rate);
+            let k = Svf::k(rp.filter_resonance[i]);
+
+            // Gain-compensated tanh drive on the filter input.
+            let drive = rp.filter_drive[i];
+            let driven = (mixed * drive).tanh() / drive.tanh();
+            let filtered = self.filter.lowpass(driven, g, k);
+
+            *sample += filtered * env * self.velocity_gain;
         }
     }
 }

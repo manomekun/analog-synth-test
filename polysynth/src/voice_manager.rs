@@ -150,6 +150,9 @@ mod tests {
     use super::*;
     use crate::dsp::oscillator::Waveform;
 
+    const CUTOFFS: [f32; 64] = [20_000.0; 64];
+    const DRIVES: [f32; 64] = [1.0; 64];
+
     fn render_params<'a>(levels: &'a [f32; 64], zeros: &'a [f32; 64]) -> RenderParams<'a> {
         RenderParams {
             osc1_wave: Waveform::Saw,
@@ -161,6 +164,11 @@ mod tests {
             osc1_level: &levels[..],
             osc2_level: &zeros[..],
             noise_level: &zeros[..],
+            filter_cutoff: &CUTOFFS[..],
+            filter_resonance: &zeros[..],
+            filter_env_semitones: &zeros[..],
+            filter_drive: &DRIVES[..],
+            filter_keytrack: 0.0,
         }
     }
 

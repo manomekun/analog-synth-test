@@ -154,3 +154,105 @@ impl Envelope {
         self.output
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SAMPLE_RATE: f32 = 44_100.0;
+
+    #[test]
+    fn attack_reaches_peak_in_expected_time() {
+        let mut env = Envelope::new(SAMPLE_RATE);
+        env.note_on(0.1, 0.2, 0.5, 0.1);
+
+        let mut samples = 0usize;
+        while env.state() == EnvelopeState::Attack {
+            env.next();
+            samples += 1;
+            assert!(samples < 44_100, "attack never finished");
+        }
+        let elapsed = samples as f32 / SAMPLE_RATE;
+        assert!(
+            (elapsed - 0.1).abs() < 0.01,
+            "attack took {elapsed:.3}s, expected 0.1s"
+        );
+    }
+
+    #[test]
+    fn release_decays_to_silence_in_expected_time() {
+        let mut env = Envelope::new(SAMPLE_RATE);
+        env.note_on(0.001, 0.001, 1.0, 0.2);
+        // Get to sustain
+        for _ in 0..1000 {
+            env.next();
+        }
+        assert_eq!(env.state(), EnvelopeState::Sustain);
+
+        env.note_off();
+        let mut samples = 0usize;
+        while !env.is_finished() {
+            env.next();
+            samples += 1;
+            assert!(samples < 88_200, "release never finished");
+        }
+        let elapsed = samples as f32 / SAMPLE_RATE;
+        assert!(
+            (elapsed - 0.2).abs() < 0.02,
+            "release took {elapsed:.3}s, expected 0.2s"
+        );
+    }
+
+    #[test]
+    fn retrigger_from_release_does_not_click() {
+        let mut env = Envelope::new(SAMPLE_RATE);
+        env.note_on(0.01, 0.1, 0.8, 0.5);
+        for _ in 0..2000 {
+            env.next();
+        }
+        env.note_off();
+        for _ in 0..2000 {
+            env.next();
+        }
+        let level_before = env.value();
+        assert!(level_before > 0.0, "should still be releasing");
+
+        // Retrigger: the attack must continue from the current level.
+        env.note_on(0.01, 0.1, 0.8, 0.5);
+        let first = env.next();
+        assert!(
+            (first - level_before).abs() < 0.01,
+            "retrigger jumped from {level_before} to {first}"
+        );
+    }
+
+    #[test]
+    fn fast_release_finishes_quickly() {
+        let mut env = Envelope::new(SAMPLE_RATE);
+        env.note_on(0.001, 0.1, 1.0, 5.0);
+        for _ in 0..1000 {
+            env.next();
+        }
+        env.fast_release();
+        let mut samples = 0usize;
+        while !env.is_finished() {
+            env.next();
+            samples += 1;
+        }
+        // ~3 ms fade
+        assert!(
+            samples < (0.005 * SAMPLE_RATE) as usize,
+            "fast release took {samples} samples"
+        );
+    }
+
+    #[test]
+    fn zero_sustain_note_falls_silent_while_held() {
+        let mut env = Envelope::new(SAMPLE_RATE);
+        env.note_on(0.001, 0.05, 0.0, 0.1);
+        for _ in 0..(SAMPLE_RATE * 0.5) as usize {
+            env.next();
+        }
+        assert!(env.value() < 1e-3, "plucked note should fade out: {}", env.value());
+    }
+}

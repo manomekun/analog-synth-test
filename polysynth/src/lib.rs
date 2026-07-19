@@ -104,6 +104,10 @@ impl Plugin for PolySynth {
             let mut osc1_level = [0.0f32; MAX_BLOCK_SIZE];
             let mut osc2_level = [0.0f32; MAX_BLOCK_SIZE];
             let mut noise_level = [0.0f32; MAX_BLOCK_SIZE];
+            let mut filter_cutoff = [0.0f32; MAX_BLOCK_SIZE];
+            let mut filter_resonance = [0.0f32; MAX_BLOCK_SIZE];
+            let mut filter_env = [0.0f32; MAX_BLOCK_SIZE];
+            let mut filter_drive = [0.0f32; MAX_BLOCK_SIZE];
             let params = &self.params;
             params.osc1_pulse_width.smoothed.next_block(&mut osc1_pw, block_len);
             params.osc2_pulse_width.smoothed.next_block(&mut osc2_pw, block_len);
@@ -111,6 +115,10 @@ impl Plugin for PolySynth {
             params.osc1_level.smoothed.next_block(&mut osc1_level, block_len);
             params.osc2_level.smoothed.next_block(&mut osc2_level, block_len);
             params.noise_level.smoothed.next_block(&mut noise_level, block_len);
+            params.filter_cutoff.smoothed.next_block(&mut filter_cutoff, block_len);
+            params.filter_resonance.smoothed.next_block(&mut filter_resonance, block_len);
+            params.filter_env_amount.smoothed.next_block(&mut filter_env, block_len);
+            params.filter_drive.smoothed.next_block(&mut filter_drive, block_len);
 
             let render_params = RenderParams {
                 osc1_wave: params.osc1_wave.value(),
@@ -122,6 +130,11 @@ impl Plugin for PolySynth {
                 osc1_level: &osc1_level[..block_len],
                 osc2_level: &osc2_level[..block_len],
                 noise_level: &noise_level[..block_len],
+                filter_cutoff: &filter_cutoff[..block_len],
+                filter_resonance: &filter_resonance[..block_len],
+                filter_env_semitones: &filter_env[..block_len],
+                filter_drive: &filter_drive[..block_len],
+                filter_keytrack: params.filter_keytrack.value(),
             };
 
             self.voices.render(mono, &render_params, |terminated| {
