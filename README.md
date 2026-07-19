@@ -23,6 +23,18 @@ NOISE (xorshift) ┘              ▲                    ▲
 - **ポリフォニー**: 最大16ボイス(可変)、リリース優先の最古ボイススチール、CLAPポリフォニックモジュレーション対応(per-voice gain)
 - **GUI**: egui製カスタムエディタ(自作ノブウィジェット、Shiftで微調整、ダブルクリックでリセット)
 
+## ダウンロード
+
+ビルド済みバイナリは [GitHub Releases](https://github.com/manomekun/analog-synth-test/releases)
+から入手できます(Linux x86_64 / macOS universal / Windows x86_64)。
+zipを展開して `PolySynth.clap` をDAWのCLAPプラグインディレクトリに配置してください:
+
+- Linux: `~/.clap/`
+- macOS: `~/Library/Audio/Plug-Ins/CLAP/`
+- Windows: `%COMMONPROGRAMFILES%\CLAP\`
+
+リリースは `v*` タグのプッシュでGitHub Actionsが自動ビルド・公開します。
+
 ## ビルド
 
 要件: Rust stable ≥ 1.87
