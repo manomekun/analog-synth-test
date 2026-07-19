@@ -10,6 +10,10 @@ pub const GAIN_POLY_MOD_ID: u32 = 0;
 
 #[derive(Params)]
 pub struct SynthParams {
+    /// Editor window state (size, open), persisted with the plugin state.
+    #[persist = "editor-state"]
+    pub editor_state: Arc<nice_plug_egui::EguiState>,
+
     // --- Oscillator 1 ---
     #[id = "o1_wave"]
     pub osc1_wave: EnumParam<Waveform>,
@@ -153,6 +157,8 @@ fn level_param(name: &str, default: f32) -> FloatParam {
 impl Default for SynthParams {
     fn default() -> Self {
         Self {
+            editor_state: crate::editor::default_state(),
+
             osc1_wave: EnumParam::new("Osc 1 Wave", Waveform::Saw),
             osc1_pulse_width: pulse_width_param("Osc 1 Pulse Width"),
 

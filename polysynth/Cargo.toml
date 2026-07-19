@@ -20,6 +20,9 @@ standalone = ["nice-plug/standalone"]
 [dependencies]
 # CLAP-only build (the `vst3` default feature is disabled: bindings are GPLv3)
 nice-plug = { version = "0.1.10", default-features = false, features = ["assert_process_allocs"] }
+nice-plug-egui = "0.2"
+# Must stay in lockstep with the egui version used by nice-plug-egui
+egui = "0.35"
 
 [dev-dependencies]
 rustfft = "6"

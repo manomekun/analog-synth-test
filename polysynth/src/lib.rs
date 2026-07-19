@@ -2,6 +2,7 @@ use nice_plug::prelude::*;
 use std::sync::Arc;
 
 mod dsp;
+mod editor;
 mod params;
 mod voice_manager;
 
@@ -51,6 +52,10 @@ impl Plugin for PolySynth {
 
     fn params(&self) -> Arc<dyn Params> {
         self.params.clone()
+    }
+
+    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        editor::create(self.params.clone())
     }
 
     fn initialize(
