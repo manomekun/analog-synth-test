@@ -2,8 +2,34 @@ use std::sync::Arc;
 
 use nice_plug::prelude::*;
 
+use crate::dsp::oscillator::Waveform;
+
 #[derive(Params)]
 pub struct SynthParams {
+    // --- Oscillator 1 ---
+    #[id = "o1_wave"]
+    pub osc1_wave: EnumParam<Waveform>,
+    #[id = "o1_pw"]
+    pub osc1_pulse_width: FloatParam,
+
+    // --- Oscillator 2 ---
+    #[id = "o2_wave"]
+    pub osc2_wave: EnumParam<Waveform>,
+    #[id = "o2_oct"]
+    pub osc2_octave: IntParam,
+    #[id = "o2_det"]
+    pub osc2_detune: FloatParam,
+    #[id = "o2_pw"]
+    pub osc2_pulse_width: FloatParam,
+
+    // --- Mixer ---
+    #[id = "o1_lvl"]
+    pub osc1_level: FloatParam,
+    #[id = "o2_lvl"]
+    pub osc2_level: FloatParam,
+    #[id = "nz_lvl"]
+    pub noise_level: FloatParam,
+
     // --- Amp envelope ---
     #[id = "amp_att"]
     pub amp_attack: FloatParam,
@@ -63,9 +89,56 @@ fn s2v_f32_ms_then_s() -> Arc<dyn Fn(&str) -> Option<f32> + Send + Sync> {
     })
 }
 
+/// Pulse width: 1% .. 99%, only audible when the waveform is Pulse.
+fn pulse_width_param(name: &str) -> FloatParam {
+    FloatParam::new(
+        name,
+        0.5,
+        FloatRange::Linear {
+            min: 0.01,
+            max: 0.99,
+        },
+    )
+    .with_smoother(SmoothingStyle::Linear(10.0))
+    .with_value_to_string(formatters::v2s_f32_percentage(0))
+    .with_string_to_value(formatters::s2v_f32_percentage())
+    .with_unit("%")
+}
+
+/// Mixer level: plain linear 0 .. 1.
+fn level_param(name: &str, default: f32) -> FloatParam {
+    FloatParam::new(name, default, FloatRange::Linear { min: 0.0, max: 1.0 })
+        .with_smoother(SmoothingStyle::Linear(10.0))
+        .with_value_to_string(formatters::v2s_f32_percentage(0))
+        .with_string_to_value(formatters::s2v_f32_percentage())
+        .with_unit("%")
+}
+
 impl Default for SynthParams {
     fn default() -> Self {
         Self {
+            osc1_wave: EnumParam::new("Osc 1 Wave", Waveform::Saw),
+            osc1_pulse_width: pulse_width_param("Osc 1 Pulse Width"),
+
+            osc2_wave: EnumParam::new("Osc 2 Wave", Waveform::Saw),
+            osc2_octave: IntParam::new("Osc 2 Octave", 0, IntRange::Linear { min: -2, max: 2 }),
+            osc2_detune: FloatParam::new(
+                "Osc 2 Detune",
+                7.0,
+                FloatRange::Linear {
+                    min: -100.0,
+                    max: 100.0,
+                },
+            )
+            .with_smoother(SmoothingStyle::Linear(20.0))
+            .with_unit(" ct")
+            .with_value_to_string(formatters::v2s_f32_rounded(1)),
+            osc2_pulse_width: pulse_width_param("Osc 2 Pulse Width"),
+
+            osc1_level: level_param("Osc 1 Level", 1.0),
+            osc2_level: level_param("Osc 2 Level", 0.5),
+            noise_level: level_param("Noise Level", 0.0),
+
             amp_attack: envelope_time_param("Amp Attack", 0.005),
             amp_decay: envelope_time_param("Amp Decay", 0.2),
             amp_sustain: FloatParam::new(

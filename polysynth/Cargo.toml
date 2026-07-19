@@ -20,3 +20,6 @@ standalone = ["nice-plug/standalone"]
 [dependencies]
 # CLAP-only build (the `vst3` default feature is disabled: bindings are GPLv3)
 nice-plug = { version = "0.1.10", default-features = false, features = ["assert_process_allocs"] }
+
+[dev-dependencies]
+rustfft = "6"

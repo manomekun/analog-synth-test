@@ -1,10 +1,27 @@
-//! A single synthesizer voice. M1: one sine oscillator through the amp envelope.
+//! A single synthesizer voice: 2 oscillators + noise -> mixer -> amp envelope.
 
 use crate::dsp::envelope::Envelope;
-use crate::dsp::oscillator::Oscillator;
+use crate::dsp::noise::Noise;
+use crate::dsp::oscillator::{Oscillator, Waveform};
 use crate::params::SynthParams;
 
 use nice_plug::util;
+
+/// Per-block parameter values shared by all voices. The smoothed params are
+/// consumed exactly once per sub-block into these slices by the process loop,
+/// so that every voice sees the same values without advancing the smoothers.
+pub struct RenderParams<'a> {
+    pub osc1_wave: Waveform,
+    pub osc2_wave: Waveform,
+    /// Static frequency multiplier for osc 2 from the (unsmoothed) octave param.
+    pub osc2_octave_mult: f32,
+    pub osc1_pw: &'a [f32],
+    pub osc2_pw: &'a [f32],
+    pub osc2_detune_cents: &'a [f32],
+    pub osc1_level: &'a [f32],
+    pub osc2_level: &'a [f32],
+    pub noise_level: &'a [f32],
+}
 
 #[derive(Debug, Clone)]
 pub struct Voice {
@@ -15,8 +32,11 @@ pub struct Voice {
     /// Monotonically increasing counter used for oldest-voice stealing.
     pub internal_id: u64,
 
+    base_freq: f32,
     velocity_gain: f32,
-    osc: Oscillator,
+    osc1: Oscillator,
+    osc2: Oscillator,
+    noise: Noise,
     amp_env: Envelope,
 }
 
@@ -30,8 +50,11 @@ impl Voice {
         internal_id: u64,
         params: &SynthParams,
     ) -> Self {
-        let mut osc = Oscillator::new(sample_rate);
-        osc.set_frequency(util::midi_note_to_freq(note));
+        let base_freq = util::midi_note_to_freq(note);
+
+        let mut osc1 = Oscillator::new(sample_rate);
+        osc1.set_frequency(base_freq);
+        let osc2 = Oscillator::new(sample_rate);
 
         let mut amp_env = Envelope::new(sample_rate);
         amp_env.note_on(
@@ -46,8 +69,12 @@ impl Voice {
             channel,
             note,
             internal_id,
+            base_freq,
             velocity_gain: velocity,
-            osc,
+            osc1,
+            osc2,
+            // Vary the seed per voice so unison noise doesn't correlate.
+            noise: Noise::new(0x9E37_79B9 ^ internal_id as u32),
             amp_env,
         }
     }
@@ -70,13 +97,22 @@ impl Voice {
     }
 
     /// Render this voice additively into a mono buffer.
-    pub fn render(&mut self, output: &mut [f32], _params: &SynthParams) {
-        for sample in output.iter_mut() {
+    pub fn render(&mut self, output: &mut [f32], rp: &RenderParams) {
+        for (i, sample) in output.iter_mut().enumerate() {
             let env = self.amp_env.next();
             if self.amp_env.is_finished() {
                 break;
             }
-            *sample += self.osc.next() * env * self.velocity_gain;
+
+            let osc2_freq =
+                self.base_freq * rp.osc2_octave_mult * (rp.osc2_detune_cents[i] / 1200.0).exp2();
+            self.osc2.set_frequency(osc2_freq);
+
+            let mixed = self.osc1.next(rp.osc1_wave, rp.osc1_pw[i]) * rp.osc1_level[i]
+                + self.osc2.next(rp.osc2_wave, rp.osc2_pw[i]) * rp.osc2_level[i]
+                + self.noise.next() * rp.noise_level[i];
+
+            *sample += mixed * env * self.velocity_gain;
         }
     }
 }

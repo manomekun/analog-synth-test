@@ -1,6 +1,6 @@
 //! Fixed-pool polyphonic voice management with voice stealing.
 
-use crate::dsp::voice::Voice;
+use crate::dsp::voice::{RenderParams, Voice};
 use crate::params::SynthParams;
 
 pub const MAX_VOICES: usize = 16;
@@ -115,12 +115,12 @@ impl VoiceManager {
     pub fn render(
         &mut self,
         output: &mut [f32],
-        params: &SynthParams,
+        rp: &RenderParams,
         mut on_terminated: impl FnMut(TerminatedVoice),
     ) {
         for slot in self.voices.iter_mut() {
             if let Some(voice) = slot {
-                voice.render(output, params);
+                voice.render(output, rp);
                 if voice.is_finished() {
                     on_terminated(TerminatedVoice {
                         voice_id: voice.voice_id,
@@ -142,5 +142,119 @@ fn voice_matches(voice: &Voice, voice_id: Option<i32>, channel: u8, note: u8) ->
     match voice_id {
         Some(id) => voice.voice_id == Some(id),
         None => voice.channel == channel && voice.note == note,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dsp::oscillator::Waveform;
+
+    fn render_params<'a>(levels: &'a [f32; 64], zeros: &'a [f32; 64]) -> RenderParams<'a> {
+        RenderParams {
+            osc1_wave: Waveform::Saw,
+            osc2_wave: Waveform::Saw,
+            osc2_octave_mult: 1.0,
+            osc1_pw: &levels[..],
+            osc2_pw: &levels[..],
+            osc2_detune_cents: &zeros[..],
+            osc1_level: &levels[..],
+            osc2_level: &zeros[..],
+            noise_level: &zeros[..],
+        }
+    }
+
+    #[test]
+    fn steals_oldest_voice_when_pool_is_full() {
+        let params = SynthParams::default();
+        let mut vm = VoiceManager::new(44_100.0);
+
+        for note in 0..MAX_VOICES as u8 {
+            assert!(vm.note_on(Some(note as i32), 0, 60 + note, 0.8, &params).is_none());
+        }
+        assert_eq!(vm.active_voices(), MAX_VOICES);
+
+        // The 17th note steals the oldest voice (the first note-on).
+        let stolen = vm.note_on(Some(100), 0, 40, 0.8, &params);
+        assert_eq!(vm.active_voices(), MAX_VOICES);
+        let stolen = stolen.expect("a voice must have been stolen");
+        assert_eq!(stolen.voice_id, Some(0));
+        assert_eq!(stolen.note, 60);
+    }
+
+    #[test]
+    fn prefers_stealing_releasing_voices() {
+        let params = SynthParams::default();
+        let mut vm = VoiceManager::new(44_100.0);
+
+        for note in 0..MAX_VOICES as u8 {
+            vm.note_on(Some(note as i32), 0, 60 + note, 0.8, &params);
+        }
+        // Voice 5 is releasing; despite not being the oldest it gets stolen.
+        vm.note_off(Some(5), 0, 65);
+        let stolen = vm.note_on(Some(100), 0, 40, 0.8, &params).unwrap();
+        assert_eq!(stolen.voice_id, Some(5));
+    }
+
+    #[test]
+    fn note_off_matches_by_channel_and_note_without_voice_id() {
+        let params = SynthParams::default();
+        let mut vm = VoiceManager::new(44_100.0);
+        let levels = [0.5f32; 64];
+        let zeros = [0.0f32; 64];
+
+        vm.note_on(None, 0, 60, 0.8, &params);
+        vm.note_on(None, 1, 60, 0.8, &params);
+        vm.note_off(None, 0, 60);
+
+        // Render until the released voice's envelope finishes; only the voice
+        // on channel 0 must terminate.
+        let mut terminated = Vec::new();
+        for _ in 0..1000 {
+            let mut buf = [0.0f32; 64];
+            let rp = render_params(&levels, &zeros);
+            vm.render(&mut buf, &rp, |t| terminated.push(t));
+        }
+        assert_eq!(terminated.len(), 1);
+        assert_eq!(terminated[0].channel, 0);
+        assert_eq!(vm.active_voices(), 1);
+    }
+
+    #[test]
+    fn finished_voices_are_removed_and_reported_once() {
+        let params = SynthParams::default();
+        let mut vm = VoiceManager::new(44_100.0);
+        let levels = [0.5f32; 64];
+        let zeros = [0.0f32; 64];
+
+        vm.note_on(Some(1), 0, 60, 0.8, &params);
+        vm.note_off(Some(1), 0, 60);
+
+        let mut terminated = 0;
+        for _ in 0..1000 {
+            let mut buf = [0.0f32; 64];
+            let rp = render_params(&levels, &zeros);
+            vm.render(&mut buf, &rp, |_| terminated += 1);
+        }
+        assert_eq!(terminated, 1);
+        assert_eq!(vm.active_voices(), 0);
+    }
+
+    #[test]
+    fn rendered_audio_is_nonzero_while_held() {
+        let params = SynthParams::default();
+        let mut vm = VoiceManager::new(44_100.0);
+        let levels = [0.8f32; 64];
+        let zeros = [0.0f32; 64];
+
+        vm.note_on(Some(1), 0, 69, 1.0, &params);
+        let mut energy = 0.0f32;
+        for _ in 0..100 {
+            let mut buf = [0.0f32; 64];
+            let rp = render_params(&levels, &zeros);
+            vm.render(&mut buf, &rp, |_| {});
+            energy += buf.iter().map(|x| x * x).sum::<f32>();
+        }
+        assert!(energy > 1.0, "held voice should produce audio, got {energy}");
     }
 }

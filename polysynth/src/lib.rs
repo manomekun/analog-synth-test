@@ -5,6 +5,7 @@ mod dsp;
 mod params;
 mod voice_manager;
 
+use dsp::voice::RenderParams;
 use params::SynthParams;
 use voice_manager::{TerminatedVoice, VoiceManager};
 
@@ -95,8 +96,35 @@ impl Plugin for PolySynth {
             let mut mono = [0.0f32; MAX_BLOCK_SIZE];
             let mono = &mut mono[..block_len];
 
-            let params = self.params.clone();
-            self.voices.render(mono, &params, |terminated| {
+            // Consume each smoothed param exactly once per sub-block; all
+            // voices then read the same value arrays.
+            let mut osc1_pw = [0.0f32; MAX_BLOCK_SIZE];
+            let mut osc2_pw = [0.0f32; MAX_BLOCK_SIZE];
+            let mut osc2_detune = [0.0f32; MAX_BLOCK_SIZE];
+            let mut osc1_level = [0.0f32; MAX_BLOCK_SIZE];
+            let mut osc2_level = [0.0f32; MAX_BLOCK_SIZE];
+            let mut noise_level = [0.0f32; MAX_BLOCK_SIZE];
+            let params = &self.params;
+            params.osc1_pulse_width.smoothed.next_block(&mut osc1_pw, block_len);
+            params.osc2_pulse_width.smoothed.next_block(&mut osc2_pw, block_len);
+            params.osc2_detune.smoothed.next_block(&mut osc2_detune, block_len);
+            params.osc1_level.smoothed.next_block(&mut osc1_level, block_len);
+            params.osc2_level.smoothed.next_block(&mut osc2_level, block_len);
+            params.noise_level.smoothed.next_block(&mut noise_level, block_len);
+
+            let render_params = RenderParams {
+                osc1_wave: params.osc1_wave.value(),
+                osc2_wave: params.osc2_wave.value(),
+                osc2_octave_mult: (params.osc2_octave.value() as f32).exp2(),
+                osc1_pw: &osc1_pw[..block_len],
+                osc2_pw: &osc2_pw[..block_len],
+                osc2_detune_cents: &osc2_detune[..block_len],
+                osc1_level: &osc1_level[..block_len],
+                osc2_level: &osc2_level[..block_len],
+                noise_level: &noise_level[..block_len],
+            };
+
+            self.voices.render(mono, &render_params, |terminated| {
                 send_voice_terminated(context, terminated, block_end - 1);
             });
 
