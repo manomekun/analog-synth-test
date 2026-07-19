@@ -136,6 +136,17 @@ impl VoiceManager {
     fn voice_indices(&self) -> impl Iterator<Item = usize> + '_ {
         (0..MAX_VOICES).filter(|&i| self.voices[i].is_some())
     }
+
+    pub fn voice_by_id_mut(&mut self, voice_id: i32) -> Option<&mut Voice> {
+        self.voices
+            .iter_mut()
+            .flatten()
+            .find(|v| v.voice_id == Some(voice_id))
+    }
+
+    pub fn voices_mut(&mut self) -> impl Iterator<Item = &mut Voice> {
+        self.voices.iter_mut().flatten()
+    }
 }
 
 fn voice_matches(voice: &Voice, voice_id: Option<i32>, channel: u8, note: u8) -> bool {
@@ -152,6 +163,7 @@ mod tests {
 
     const CUTOFFS: [f32; 64] = [20_000.0; 64];
     const DRIVES: [f32; 64] = [1.0; 64];
+    const UNITY: [f32; 64] = [1.0; 64];
 
     fn render_params<'a>(levels: &'a [f32; 64], zeros: &'a [f32; 64]) -> RenderParams<'a> {
         RenderParams {
@@ -169,6 +181,10 @@ mod tests {
             filter_env_semitones: &zeros[..],
             filter_drive: &DRIVES[..],
             filter_keytrack: 0.0,
+            lfo: &zeros[..],
+            lfo_amount: &zeros[..],
+            lfo_dest: crate::dsp::lfo::LfoDestination::None,
+            master_gain: &UNITY[..],
         }
     }
 

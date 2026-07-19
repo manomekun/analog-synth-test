@@ -2,7 +2,11 @@ use std::sync::Arc;
 
 use nice_plug::prelude::*;
 
+use crate::dsp::lfo::{LfoDestination, LfoWaveform};
 use crate::dsp::oscillator::Waveform;
+
+/// Poly-modulation ID for the master gain param (CLAP per-voice modulation).
+pub const GAIN_POLY_MOD_ID: u32 = 0;
 
 #[derive(Params)]
 pub struct SynthParams {
@@ -61,6 +65,16 @@ pub struct SynthParams {
     pub amp_sustain: FloatParam,
     #[id = "amp_rel"]
     pub amp_release: FloatParam,
+
+    // --- LFO ---
+    #[id = "lfo_wav"]
+    pub lfo_wave: EnumParam<LfoWaveform>,
+    #[id = "lfo_rat"]
+    pub lfo_rate: FloatParam,
+    #[id = "lfo_amt"]
+    pub lfo_amount: FloatParam,
+    #[id = "lfo_dst"]
+    pub lfo_dest: EnumParam<LfoDestination>,
 
     // --- Master ---
     /// Master output gain, stored as a linear factor but displayed in dB.
@@ -237,6 +251,30 @@ impl Default for SynthParams {
             .with_unit("%"),
             amp_release: envelope_time_param("Amp Release", 0.1),
 
+            lfo_wave: EnumParam::new("LFO Wave", LfoWaveform::Sine),
+            lfo_rate: FloatParam::new(
+                "LFO Rate",
+                2.0,
+                FloatRange::Skewed {
+                    min: 0.05,
+                    max: 20.0,
+                    factor: FloatRange::skew_factor(-1.5),
+                },
+            )
+            .with_smoother(SmoothingStyle::Logarithmic(20.0))
+            .with_unit(" Hz")
+            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            lfo_amount: FloatParam::new(
+                "LFO Amount",
+                0.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_smoother(SmoothingStyle::Linear(20.0))
+            .with_value_to_string(formatters::v2s_f32_percentage(0))
+            .with_string_to_value(formatters::s2v_f32_percentage())
+            .with_unit("%"),
+            lfo_dest: EnumParam::new("LFO Destination", LfoDestination::None),
+
             gain: FloatParam::new(
                 "Gain",
                 util::db_to_gain(-12.0),
@@ -249,7 +287,8 @@ impl Default for SynthParams {
             .with_smoother(SmoothingStyle::Logarithmic(20.0))
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
-            .with_string_to_value(formatters::s2v_f32_gain_to_db()),
+            .with_string_to_value(formatters::s2v_f32_gain_to_db())
+            .with_poly_modulation_id(GAIN_POLY_MOD_ID),
         }
     }
 }

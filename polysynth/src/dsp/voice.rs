@@ -2,11 +2,23 @@
 
 use crate::dsp::envelope::Envelope;
 use crate::dsp::filter::Svf;
+use crate::dsp::lfo::LfoDestination;
 use crate::dsp::noise::Noise;
 use crate::dsp::oscillator::{Oscillator, Waveform};
 use crate::params::SynthParams;
 
 use nice_plug::util;
+
+/// Per-voice gain modulation state driven by CLAP `PolyModulation` /
+/// `MonoAutomation` events. `current` chases `target` with a short one-pole
+/// smoother so per-voice modulation doesn't zipper.
+#[derive(Debug, Clone, Copy)]
+pub struct GainMod {
+    /// The host-provided normalized modulation offset for this voice.
+    pub normalized_offset: f32,
+    current: f32,
+    target: f32,
+}
 
 /// Per-block parameter values shared by all voices. The smoothed params are
 /// consumed exactly once per sub-block into these slices by the process loop,
@@ -28,6 +40,12 @@ pub struct RenderParams<'a> {
     pub filter_drive: &'a [f32],
     /// Keytrack amount 0..1 (unsmoothed).
     pub filter_keytrack: f32,
+    /// Global LFO output per sample, bipolar -1..1.
+    pub lfo: &'a [f32],
+    pub lfo_amount: &'a [f32],
+    pub lfo_dest: LfoDestination,
+    /// Master gain per sample; used unless the voice has per-voice modulation.
+    pub master_gain: &'a [f32],
 }
 
 #[derive(Debug, Clone)]
@@ -48,6 +66,9 @@ pub struct Voice {
     filter: Svf,
     amp_env: Envelope,
     filt_env: Envelope,
+    gain_mod: Option<GainMod>,
+    /// One-pole coefficient for the per-voice gain smoother (~5 ms).
+    gain_mod_coef: f32,
 }
 
 impl Voice {
@@ -96,7 +117,35 @@ impl Voice {
             filter: Svf::new(),
             amp_env,
             filt_env,
+            gain_mod: None,
+            gain_mod_coef: 1.0 - (-1.0 / (0.005 * sample_rate)).exp(),
         }
+    }
+
+    /// Apply a host `PolyModulation` event: this voice's gain now follows its
+    /// own modulated value instead of the global one.
+    pub fn set_gain_modulation(&mut self, normalized_offset: f32, target_plain: f32) {
+        let current = match self.gain_mod {
+            Some(m) => m.current,
+            None => target_plain,
+        };
+        self.gain_mod = Some(GainMod {
+            normalized_offset,
+            current,
+            target: target_plain,
+        });
+    }
+
+    /// Apply a host `MonoAutomation` event to a voice that has a poly
+    /// modulation offset.
+    pub fn update_gain_target(&mut self, target_plain: f32) {
+        if let Some(m) = &mut self.gain_mod {
+            m.target = target_plain;
+        }
+    }
+
+    pub fn gain_mod_offset(&self) -> Option<f32> {
+        self.gain_mod.map(|m| m.normalized_offset)
     }
 
     pub fn note_off(&mut self) {
@@ -129,8 +178,22 @@ impl Voice {
                 break;
             }
 
-            let osc2_freq =
-                self.base_freq * rp.osc2_octave_mult * (rp.osc2_detune_cents[i] / 1200.0).exp2();
+            let lfo = rp.lfo[i];
+            let lfo_amount = rp.lfo_amount[i];
+
+            // LFO -> pitch: up to +-1200 cents, squared for fine control at
+            // small amounts.
+            let pitch_mult = if rp.lfo_dest == LfoDestination::Pitch {
+                (lfo * lfo_amount * lfo_amount).exp2()
+            } else {
+                1.0
+            };
+
+            self.osc1.set_frequency(self.base_freq * pitch_mult);
+            let osc2_freq = self.base_freq
+                * pitch_mult
+                * rp.osc2_octave_mult
+                * (rp.osc2_detune_cents[i] / 1200.0).exp2();
             self.osc2.set_frequency(osc2_freq);
 
             let mixed = self.osc1.next(rp.osc1_wave, rp.osc1_pw[i]) * rp.osc1_level[i]
@@ -139,7 +202,10 @@ impl Voice {
 
             // Modulate the cutoff in the exponential (semitone) domain.
             let filt_env = self.filt_env.next();
-            let semis = keytrack_semis + rp.filter_env_semitones[i] * filt_env;
+            let mut semis = keytrack_semis + rp.filter_env_semitones[i] * filt_env;
+            if rp.lfo_dest == LfoDestination::Cutoff {
+                semis += lfo * lfo_amount * 48.0;
+            }
             let cutoff = (rp.filter_cutoff[i] * (semis / 12.0).exp2()).clamp(20.0, max_cutoff);
             let g = Svf::g(cutoff, self.sample_rate);
             let k = Svf::k(rp.filter_resonance[i]);
@@ -149,7 +215,24 @@ impl Voice {
             let driven = (mixed * drive).tanh() / drive.tanh();
             let filtered = self.filter.lowpass(driven, g, k);
 
-            *sample += filtered * env * self.velocity_gain;
+            // LFO -> amp: tremolo between full level and (1 - depth).
+            let tremolo = if rp.lfo_dest == LfoDestination::Amp {
+                1.0 - lfo_amount * (0.5 + 0.5 * lfo)
+            } else {
+                1.0
+            };
+
+            // Per-voice modulated gain if the host sent PolyModulation events,
+            // otherwise the global master gain.
+            let gain = match &mut self.gain_mod {
+                Some(m) => {
+                    m.current += self.gain_mod_coef * (m.target - m.current);
+                    m.current
+                }
+                None => rp.master_gain[i],
+            };
+
+            *sample += filtered * env * self.velocity_gain * tremolo * gain;
         }
     }
 }
