@@ -1,0 +1,22 @@
+[package]
+name = "polysynth"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.87"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+name = "polysynth"
+path = "src/main.rs"
+required-features = ["standalone"]
+
+[features]
+default = []
+standalone = ["nice-plug/standalone"]
+
+[dependencies]
+# CLAP-only build (the `vst3` default feature is disabled: bindings are GPLv3)
+nice-plug = { version = "0.1.10", default-features = false, features = ["assert_process_allocs"] }

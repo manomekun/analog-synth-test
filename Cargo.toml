@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["polysynth", "xtask"]
+
+[profile.release]
+lto = "thin"
+strip = "symbols"
+
+# Keep debug symbols for profiling the release-optimized build
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = "none"
