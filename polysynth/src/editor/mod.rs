@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
-use nice_plug::prelude::*;
 use egui::{self, Frame, Layout, Margin, RichText, Ui};
+use nice_plug::prelude::*;
 use nice_plug_egui::widgets::ParamSlider;
-use nice_plug_egui::{EguiSettings, EguiState, create_egui_editor};
+use nice_plug_egui::{create_egui_editor, EguiSettings, EguiState};
 
 use crate::params::SynthParams;
 
@@ -41,7 +41,11 @@ fn draw(ui: &mut Ui, setter: &ParamSetter, params: &SynthParams) {
             );
             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(8.0);
-                ui.label(RichText::new("virtual analog").size(11.0).color(theme::TEXT_DIM));
+                ui.label(
+                    RichText::new("virtual analog")
+                        .size(11.0)
+                        .color(theme::TEXT_DIM),
+                );
             });
         });
         ui.add_space(4.0);
@@ -113,6 +117,8 @@ fn draw(ui: &mut Ui, setter: &ParamSetter, params: &SynthParams) {
             section(ui, "MASTER", |ui| {
                 ui.horizontal(|ui| {
                     ui.add(Knob::for_param(&params.gain, setter));
+                    ui.add(Knob::for_param(&params.polyphony, setter));
+                    ui.add(Knob::for_param(&params.velocity_sens, setter));
                 });
             });
         });

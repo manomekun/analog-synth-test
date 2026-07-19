@@ -8,8 +8,8 @@ mod voice_manager;
 
 use dsp::lfo::Lfo;
 use dsp::voice::RenderParams;
-use params::{GAIN_POLY_MOD_ID, SynthParams};
-use voice_manager::{MAX_VOICES, TerminatedVoice, VoiceManager};
+use params::{SynthParams, GAIN_POLY_MOD_ID};
+use voice_manager::{TerminatedVoice, VoiceManager, MAX_VOICES};
 
 /// Processing happens in sub-blocks of at most this many samples, split at
 /// note-event boundaries.
@@ -19,6 +19,9 @@ pub struct PolySynth {
     params: Arc<SynthParams>,
     voices: VoiceManager,
     lfo: Lfo,
+    /// Last polyphony value reported to the host via
+    /// `set_current_voice_capacity`; 0 forces a report on the first process.
+    reported_polyphony: u32,
 }
 
 impl Default for PolySynth {
@@ -27,6 +30,7 @@ impl Default for PolySynth {
             params: Arc::new(SynthParams::default()),
             voices: VoiceManager::new(44_100.0),
             lfo: Lfo::new(44_100.0),
+            reported_polyphony: 0,
         }
     }
 }
@@ -66,7 +70,9 @@ impl Plugin for PolySynth {
     ) -> bool {
         self.voices = VoiceManager::new(buffer_config.sample_rate);
         self.lfo = Lfo::new(buffer_config.sample_rate);
-        context.set_current_voice_capacity(MAX_VOICES as u32);
+        let polyphony = self.params.polyphony.value() as u32;
+        context.set_current_voice_capacity(polyphony);
+        self.reported_polyphony = polyphony;
         true
     }
 
@@ -83,6 +89,12 @@ impl Plugin for PolySynth {
     ) -> ProcessStatus {
         let num_samples = buffer.samples();
         let output = buffer.as_slice();
+
+        let polyphony = self.params.polyphony.value() as u32;
+        if polyphony != self.reported_polyphony {
+            context.set_current_voice_capacity(polyphony);
+            self.reported_polyphony = polyphony;
+        }
 
         let mut next_event = context.next_event();
         let mut block_start = 0;
@@ -120,23 +132,59 @@ impl Plugin for PolySynth {
             let mut filter_env = [0.0f32; MAX_BLOCK_SIZE];
             let mut filter_drive = [0.0f32; MAX_BLOCK_SIZE];
             let params = &self.params;
-            params.osc1_pulse_width.smoothed.next_block(&mut osc1_pw, block_len);
-            params.osc2_pulse_width.smoothed.next_block(&mut osc2_pw, block_len);
-            params.osc2_detune.smoothed.next_block(&mut osc2_detune, block_len);
-            params.osc1_level.smoothed.next_block(&mut osc1_level, block_len);
-            params.osc2_level.smoothed.next_block(&mut osc2_level, block_len);
-            params.noise_level.smoothed.next_block(&mut noise_level, block_len);
-            params.filter_cutoff.smoothed.next_block(&mut filter_cutoff, block_len);
-            params.filter_resonance.smoothed.next_block(&mut filter_resonance, block_len);
-            params.filter_env_amount.smoothed.next_block(&mut filter_env, block_len);
-            params.filter_drive.smoothed.next_block(&mut filter_drive, block_len);
+            params
+                .osc1_pulse_width
+                .smoothed
+                .next_block(&mut osc1_pw, block_len);
+            params
+                .osc2_pulse_width
+                .smoothed
+                .next_block(&mut osc2_pw, block_len);
+            params
+                .osc2_detune
+                .smoothed
+                .next_block(&mut osc2_detune, block_len);
+            params
+                .osc1_level
+                .smoothed
+                .next_block(&mut osc1_level, block_len);
+            params
+                .osc2_level
+                .smoothed
+                .next_block(&mut osc2_level, block_len);
+            params
+                .noise_level
+                .smoothed
+                .next_block(&mut noise_level, block_len);
+            params
+                .filter_cutoff
+                .smoothed
+                .next_block(&mut filter_cutoff, block_len);
+            params
+                .filter_resonance
+                .smoothed
+                .next_block(&mut filter_resonance, block_len);
+            params
+                .filter_env_amount
+                .smoothed
+                .next_block(&mut filter_env, block_len);
+            params
+                .filter_drive
+                .smoothed
+                .next_block(&mut filter_drive, block_len);
 
             let mut lfo_rate = [0.0f32; MAX_BLOCK_SIZE];
             let mut lfo_amount = [0.0f32; MAX_BLOCK_SIZE];
             let mut lfo_buf = [0.0f32; MAX_BLOCK_SIZE];
             let mut master_gain = [0.0f32; MAX_BLOCK_SIZE];
-            params.lfo_rate.smoothed.next_block(&mut lfo_rate, block_len);
-            params.lfo_amount.smoothed.next_block(&mut lfo_amount, block_len);
+            params
+                .lfo_rate
+                .smoothed
+                .next_block(&mut lfo_rate, block_len);
+            params
+                .lfo_amount
+                .smoothed
+                .next_block(&mut lfo_amount, block_len);
             params.gain.smoothed.next_block(&mut master_gain, block_len);
             let lfo_wave = params.lfo_wave.value();
             for i in 0..block_len {
@@ -195,10 +243,15 @@ impl PolySynth {
                 note,
                 velocity,
             } => {
-                if let Some(stolen) =
-                    self.voices
-                        .note_on(*voice_id, *channel, *note, *velocity, &self.params)
-                {
+                let max_voices = self.params.polyphony.value() as usize;
+                if let Some(stolen) = self.voices.note_on(
+                    *voice_id,
+                    *channel,
+                    *note,
+                    *velocity,
+                    max_voices,
+                    &self.params,
+                ) {
                     send_voice_terminated(context, stolen, *timing as usize);
                 }
             }
@@ -232,10 +285,7 @@ impl PolySynth {
             } if *poly_modulation_id == GAIN_POLY_MOD_ID => {
                 for voice in self.voices.voices_mut() {
                     if let Some(offset) = voice.gain_mod_offset() {
-                        let target = self
-                            .params
-                            .gain
-                            .preview_plain(normalized_value + offset);
+                        let target = self.params.gain.preview_plain(normalized_value + offset);
                         voice.update_gain_target(target);
                     }
                 }
@@ -270,11 +320,10 @@ impl ClapPlugin for PolySynth {
         ClapFeature::Stereo,
     ];
 
-    const CLAP_POLY_MODULATION_CONFIG: Option<PolyModulationConfig> =
-        Some(PolyModulationConfig {
-            max_voice_capacity: MAX_VOICES as u32,
-            supports_overlapping_voices: true,
-        });
+    const CLAP_POLY_MODULATION_CONFIG: Option<PolyModulationConfig> = Some(PolyModulationConfig {
+        max_voice_capacity: MAX_VOICES as u32,
+        supports_overlapping_voices: true,
+    });
 }
 
 nice_export_clap!(PolySynth);

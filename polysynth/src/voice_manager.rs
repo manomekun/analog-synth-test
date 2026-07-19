@@ -38,16 +38,20 @@ impl VoiceManager {
         self.voices.iter().filter(|v| v.is_some()).count()
     }
 
+    /// Start a new voice, stealing one if the pool already holds `max_voices`
+    /// active voices.
     pub fn note_on(
         &mut self,
         voice_id: Option<i32>,
         channel: u8,
         note: u8,
         velocity: f32,
+        max_voices: usize,
         params: &SynthParams,
     ) -> Option<TerminatedVoice> {
         let internal_id = self.next_internal_id;
         self.next_internal_id += 1;
+        let max_voices = max_voices.clamp(1, MAX_VOICES);
 
         let voice = Voice::new(
             self.sample_rate,
@@ -59,10 +63,12 @@ impl VoiceManager {
             params,
         );
 
-        // Free slot available: no stealing needed.
-        if let Some(slot) = self.voices.iter_mut().find(|v| v.is_none()) {
-            *slot = Some(voice);
-            return None;
+        // Free slot available and under the polyphony limit: no stealing.
+        if self.active_voices() < max_voices {
+            if let Some(slot) = self.voices.iter_mut().find(|v| v.is_none()) {
+                *slot = Some(voice);
+                return None;
+            }
         }
 
         // Steal: prefer the oldest releasing voice, otherwise the oldest voice.
@@ -74,7 +80,7 @@ impl VoiceManager {
                 self.voice_indices()
                     .min_by_key(|&i| self.voices[i].as_ref().unwrap().internal_id)
             })
-            .expect("pool is full, so a steal candidate must exist");
+            .expect("at the polyphony limit, so a steal candidate must exist");
 
         let stolen = self.voices[steal_idx].as_ref().unwrap();
         let terminated = TerminatedVoice {
@@ -194,16 +200,34 @@ mod tests {
         let mut vm = VoiceManager::new(44_100.0);
 
         for note in 0..MAX_VOICES as u8 {
-            assert!(vm.note_on(Some(note as i32), 0, 60 + note, 0.8, &params).is_none());
+            assert!(vm
+                .note_on(Some(note as i32), 0, 60 + note, 0.8, MAX_VOICES, &params)
+                .is_none());
         }
         assert_eq!(vm.active_voices(), MAX_VOICES);
 
         // The 17th note steals the oldest voice (the first note-on).
-        let stolen = vm.note_on(Some(100), 0, 40, 0.8, &params);
+        let stolen = vm.note_on(Some(100), 0, 40, 0.8, MAX_VOICES, &params);
         assert_eq!(vm.active_voices(), MAX_VOICES);
         let stolen = stolen.expect("a voice must have been stolen");
         assert_eq!(stolen.voice_id, Some(0));
         assert_eq!(stolen.note, 60);
+    }
+
+    #[test]
+    fn polyphony_limit_forces_stealing_below_pool_size() {
+        let params = SynthParams::default();
+        let mut vm = VoiceManager::new(44_100.0);
+
+        for note in 0..4u8 {
+            assert!(vm
+                .note_on(Some(note as i32), 0, 60 + note, 0.8, 4, &params)
+                .is_none());
+        }
+        // A 5th note at polyphony 4 must steal even though the pool has room.
+        let stolen = vm.note_on(Some(100), 0, 40, 0.8, 4, &params);
+        assert_eq!(stolen.expect("must steal").voice_id, Some(0));
+        assert_eq!(vm.active_voices(), 4);
     }
 
     #[test]
@@ -212,11 +236,13 @@ mod tests {
         let mut vm = VoiceManager::new(44_100.0);
 
         for note in 0..MAX_VOICES as u8 {
-            vm.note_on(Some(note as i32), 0, 60 + note, 0.8, &params);
+            vm.note_on(Some(note as i32), 0, 60 + note, 0.8, MAX_VOICES, &params);
         }
         // Voice 5 is releasing; despite not being the oldest it gets stolen.
         vm.note_off(Some(5), 0, 65);
-        let stolen = vm.note_on(Some(100), 0, 40, 0.8, &params).unwrap();
+        let stolen = vm
+            .note_on(Some(100), 0, 40, 0.8, MAX_VOICES, &params)
+            .unwrap();
         assert_eq!(stolen.voice_id, Some(5));
     }
 
@@ -227,8 +253,8 @@ mod tests {
         let levels = [0.5f32; 64];
         let zeros = [0.0f32; 64];
 
-        vm.note_on(None, 0, 60, 0.8, &params);
-        vm.note_on(None, 1, 60, 0.8, &params);
+        vm.note_on(None, 0, 60, 0.8, MAX_VOICES, &params);
+        vm.note_on(None, 1, 60, 0.8, MAX_VOICES, &params);
         vm.note_off(None, 0, 60);
 
         // Render until the released voice's envelope finishes; only the voice
@@ -251,7 +277,7 @@ mod tests {
         let levels = [0.5f32; 64];
         let zeros = [0.0f32; 64];
 
-        vm.note_on(Some(1), 0, 60, 0.8, &params);
+        vm.note_on(Some(1), 0, 60, 0.8, MAX_VOICES, &params);
         vm.note_off(Some(1), 0, 60);
 
         let mut terminated = 0;
@@ -271,7 +297,7 @@ mod tests {
         let levels = [0.8f32; 64];
         let zeros = [0.0f32; 64];
 
-        vm.note_on(Some(1), 0, 69, 1.0, &params);
+        vm.note_on(Some(1), 0, 69, 1.0, MAX_VOICES, &params);
         let mut energy = 0.0f32;
         for _ in 0..100 {
             let mut buf = [0.0f32; 64];
@@ -279,6 +305,9 @@ mod tests {
             vm.render(&mut buf, &rp, |_| {});
             energy += buf.iter().map(|x| x * x).sum::<f32>();
         }
-        assert!(energy > 1.0, "held voice should produce audio, got {energy}");
+        assert!(
+            energy > 1.0,
+            "held voice should produce audio, got {energy}"
+        );
     }
 }

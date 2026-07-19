@@ -83,6 +83,10 @@ impl Voice {
     ) -> Self {
         let base_freq = util::midi_note_to_freq(note);
 
+        // Blend between velocity-insensitive (1.0) and fully velocity-scaled.
+        let sens = params.velocity_sens.value();
+        let velocity_gain = 1.0 - sens + sens * velocity;
+
         let mut osc1 = Oscillator::new(sample_rate);
         osc1.set_frequency(base_freq);
         let osc2 = Oscillator::new(sample_rate);
@@ -109,7 +113,7 @@ impl Voice {
             internal_id,
             base_freq,
             sample_rate,
-            velocity_gain: velocity,
+            velocity_gain,
             osc1,
             osc2,
             // Vary the seed per voice so unison noise doesn't correlate.

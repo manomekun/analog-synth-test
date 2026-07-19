@@ -1,10 +1,8 @@
 //! A rotary knob widget bound to a nice-plug parameter through `ParamSetter`,
 //! so host automation gestures (begin/change/end) are reported correctly.
 
+use egui::{self, epaint, Align2, FontId, Response, Sense, Stroke, Ui, Vec2, Widget};
 use nice_plug::prelude::{Param, ParamSetter};
-use egui::{
-    self, Align2, FontId, Response, Sense, Stroke, Ui, Vec2, Widget, epaint,
-};
 
 use super::theme;
 
@@ -50,8 +48,7 @@ impl<P: Param> Widget for Knob<'_, P> {
             };
             if step != 0.0 {
                 let new_value = (self.param.unmodulated_normalized_value() + step).clamp(0.0, 1.0);
-                self.setter
-                    .set_parameter_normalized(self.param, new_value);
+                self.setter.set_parameter_normalized(self.param, new_value);
                 response.mark_changed();
             }
         }
@@ -74,14 +71,33 @@ impl<P: Param> Widget for Knob<'_, P> {
             let value = self.param.unmodulated_normalized_value();
 
             painter.circle_filled(center, radius, theme::KNOB_BODY);
-            paint_arc(painter, center, radius - 1.5, 0.0, 1.0, theme::KNOB_TRACK, 3.0);
-            paint_arc(painter, center, radius - 1.5, 0.0, value, theme::ACCENT, 3.0);
+            paint_arc(
+                painter,
+                center,
+                radius - 1.5,
+                0.0,
+                1.0,
+                theme::KNOB_TRACK,
+                3.0,
+            );
+            paint_arc(
+                painter,
+                center,
+                radius - 1.5,
+                0.0,
+                value,
+                theme::ACCENT,
+                3.0,
+            );
 
             // Pointer line
             let angle = START_ANGLE + SWEEP * value;
             let dir = Vec2::angled(angle);
             painter.line_segment(
-                [center + dir * (radius * 0.35), center + dir * (radius * 0.85)],
+                [
+                    center + dir * (radius * 0.35),
+                    center + dir * (radius * 0.85),
+                ],
                 Stroke::new(2.0, theme::TEXT),
             );
 
@@ -97,7 +113,11 @@ impl<P: Param> Widget for Knob<'_, P> {
                 Align2::CENTER_CENTER,
                 label,
                 FontId::proportional(10.5),
-                if show_value { theme::TEXT } else { theme::TEXT_DIM },
+                if show_value {
+                    theme::TEXT
+                } else {
+                    theme::TEXT_DIM
+                },
             );
         }
 

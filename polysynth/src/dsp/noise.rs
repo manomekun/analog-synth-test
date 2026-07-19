@@ -7,9 +7,7 @@ pub struct Noise {
 
 impl Noise {
     pub fn new(seed: u32) -> Self {
-        Self {
-            state: seed.max(1),
-        }
+        Self { state: seed.max(1) }
     }
 
     /// Uniform white noise in [-1, 1).

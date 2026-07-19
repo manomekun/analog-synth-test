@@ -20,11 +20,6 @@ impl Svf {
         Self::default()
     }
 
-    pub fn reset(&mut self) {
-        self.ic1eq = 0.0;
-        self.ic2eq = 0.0;
-    }
-
     /// Integrator gain for a cutoff in Hz. Callers should clamp the cutoff to
     /// well below Nyquist before calling.
     #[inline]

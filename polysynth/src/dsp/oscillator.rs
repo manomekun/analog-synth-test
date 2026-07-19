@@ -128,13 +128,8 @@ mod tests {
     /// Full-band alias totals are dominated by near-Nyquist residuals that
     /// 2-point PolyBLEP suppresses least (and the ear notices least), so
     /// `alias_band_hz` allows measuring just the audibly-sensitive band.
-    fn alias_ratio_band_db(
-        signal: &[f32],
-        freq: f32,
-        sample_rate: f32,
-        alias_band_hz: f32,
-    ) -> f32 {
-        use rustfft::{FftPlanner, num_complex::Complex};
+    fn alias_ratio_band_db(signal: &[f32], freq: f32, sample_rate: f32, alias_band_hz: f32) -> f32 {
+        use rustfft::{num_complex::Complex, FftPlanner};
 
         let n = signal.len();
         let mut buf: Vec<Complex<f32>> = signal
@@ -158,8 +153,7 @@ mod tests {
         for (bin, value) in buf.iter().enumerate().take(n / 2).skip(4) {
             let bin_freq = bin as f32 * bin_hz;
             let harmonic = (bin_freq / freq).round();
-            let is_harmonic =
-                harmonic >= 1.0 && (bin_freq - harmonic * freq).abs() < 6.0 * bin_hz;
+            let is_harmonic = harmonic >= 1.0 && (bin_freq - harmonic * freq).abs() < 6.0 * bin_hz;
             let energy = (value.norm_sqr()) as f64;
             if is_harmonic {
                 harmonic_energy += energy;
@@ -182,7 +176,11 @@ mod tests {
         let freq = 2_637.02;
         let n = 1 << 15;
 
-        let blep = alias_ratio_db(&render(Waveform::Saw, freq, sample_rate, n), freq, sample_rate);
+        let blep = alias_ratio_db(
+            &render(Waveform::Saw, freq, sample_rate, n),
+            freq,
+            sample_rate,
+        );
         let naive = alias_ratio_db(&render_naive_saw(freq, sample_rate, n), freq, sample_rate);
 
         // Two-point PolyBLEP reaches roughly -30 dB total alias energy at this
@@ -209,7 +207,10 @@ mod tests {
         let audible = alias_ratio_band_db(&signal, freq, sample_rate, 12_000.0);
         let full = alias_ratio_db(&signal, freq, sample_rate);
         eprintln!("saw C5: audible-band {audible:.1} dB, full-band {full:.1} dB");
-        assert!(audible < -50.0, "saw at C5 audible-band aliasing: {audible:.1} dB");
+        assert!(
+            audible < -50.0,
+            "saw at C5 audible-band aliasing: {audible:.1} dB"
+        );
         assert!(full < -30.0, "saw at C5 full-band aliasing: {full:.1} dB");
     }
 
@@ -224,7 +225,10 @@ mod tests {
             freq,
             sample_rate,
         );
-        assert!(blep < -28.0, "PolyBLEP square aliasing too high: {blep:.1} dB");
+        assert!(
+            blep < -28.0,
+            "PolyBLEP square aliasing too high: {blep:.1} dB"
+        );
     }
 
     #[test]

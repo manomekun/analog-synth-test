@@ -84,6 +84,10 @@ pub struct SynthParams {
     /// Master output gain, stored as a linear factor but displayed in dB.
     #[id = "gain"]
     pub gain: FloatParam,
+    #[id = "poly"]
+    pub polyphony: IntParam,
+    #[id = "velsen"]
+    pub velocity_sens: FloatParam,
 }
 
 /// Envelope time in seconds: 1 ms .. 10 s with a logarithmic-feeling skew.
@@ -112,11 +116,13 @@ fn v2s_f32_ms_then_s() -> Arc<dyn Fn(f32) -> String + Send + Sync> {
     })
 }
 
+#[allow(clippy::type_complexity)] // matches the framework's formatter signatures
 fn s2v_f32_ms_then_s() -> Arc<dyn Fn(&str) -> Option<f32> + Send + Sync> {
     Arc::new(|string| {
         let string = string.trim();
-        let (number_part, scale) = if let Some(stripped) =
-            string.strip_suffix("ms").or_else(|| string.strip_suffix("mS"))
+        let (number_part, scale) = if let Some(stripped) = string
+            .strip_suffix("ms")
+            .or_else(|| string.strip_suffix("mS"))
         {
             (stripped, 0.001)
         } else if let Some(stripped) = string.strip_suffix(['s', 'S']) {
@@ -295,6 +301,23 @@ impl Default for SynthParams {
             .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
             .with_string_to_value(formatters::s2v_f32_gain_to_db())
             .with_poly_modulation_id(GAIN_POLY_MOD_ID),
+            polyphony: IntParam::new(
+                "Polyphony",
+                8,
+                IntRange::Linear {
+                    min: 1,
+                    max: crate::voice_manager::MAX_VOICES as i32,
+                },
+            )
+            .with_unit(" voices"),
+            velocity_sens: FloatParam::new(
+                "Velocity Sens",
+                0.7,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_value_to_string(formatters::v2s_f32_percentage(0))
+            .with_string_to_value(formatters::s2v_f32_percentage())
+            .with_unit("%"),
         }
     }
 }

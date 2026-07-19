@@ -95,6 +95,7 @@ impl Envelope {
         self.state = EnvelopeState::FastRelease;
     }
 
+    #[cfg(test)]
     pub fn state(&self) -> EnvelopeState {
         self.state
     }
@@ -110,6 +111,7 @@ impl Envelope {
         )
     }
 
+    #[cfg(test)]
     pub fn value(&self) -> f32 {
         self.output
     }
@@ -253,6 +255,10 @@ mod tests {
         for _ in 0..(SAMPLE_RATE * 0.5) as usize {
             env.next();
         }
-        assert!(env.value() < 1e-3, "plucked note should fade out: {}", env.value());
+        assert!(
+            env.value() < 1e-3,
+            "plucked note should fade out: {}",
+            env.value()
+        );
     }
 }
